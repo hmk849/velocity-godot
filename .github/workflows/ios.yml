@@ -1,4 +1,3 @@
-
 name: Godot iOS Build
 
 on:
@@ -14,14 +13,14 @@ permissions:
 jobs:
   build:
     runs-on: macos-14
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Check uploaded project
+      - name: Extract project
         run: |
           set -e
-          test -f velocity_godot_phase1_chinese_font.zip
           mkdir -p source
           unzip -q velocity_godot_phase1_chinese_font.zip -d source
           test -f source/velocity/project.godot
@@ -34,20 +33,40 @@ jobs:
             https://github.com/godotengine/godot/releases/download/4.3-stable/Godot_v4.3-stable_macos.universal.zip \
             -o godot.zip
           unzip -q godot.zip -d godot
-          GODOT="$(find godot -type f -name 'Godot' | head -n 1)"
+          GODOT="$(find godot -type f -path '*/Contents/MacOS/Godot' | head -n 1)"
           if [ -z "$GODOT" ]; then
-            GODOT="$(find godot -type f -name 'Godot.app' | head -n 1)/Contents/MacOS/Godot"
+            GODOT="$(find godot -type f -name Godot | head -n 1)"
           fi
           test -x "$GODOT"
           echo "GODOT=$GODOT" >> "$GITHUB_ENV"
 
-      - name: Check Godot project
+      - name: Install Godot export templates
+        run: |
+          set -e
+          curl -L --fail \
+            https://github.com/godotengine/godot/releases/download/4.3-stable/Godot_v4.3-stable_export_templates.tpz \
+            -o templates.tpz
+          mkdir -p "$HOME/Library/Application Support/Godot/export_templates/4.3.stable"
+          unzip -oq templates.tpz -d templates
+          cp -R templates/templates/. \
+            "$HOME/Library/Application Support/Godot/export_templates/4.3.stable/"
+
+      - name: Check project
         run: |
           "$GODOT" --headless --path source/velocity --editor --quit
 
-      - name: Save project artifact
+      - name: Export project resources
+        continue-on-error: true
+        run: |
+          "$GODOT" --headless --path source/velocity \
+            --export-pack "iOS" build/velocity.pck
+
+      - name: Save build files and logs
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: velocity-godot-source
-          path: source/velocity/
-          if-no-files-found: error
+          name: velocity-ios-build-files
+          path: |
+            source/velocity/
+            build/
+          if-no-files-found: warn
