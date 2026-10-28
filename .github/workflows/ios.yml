@@ -80,13 +80,15 @@ jobs:
           application/bundle_identifier="com.example.velocity"
           EOF
 
+      
       - name: Export iOS Xcode project
         run: |
           set -e
-          mkdir -p build
-          "$GODOT" --headless --path source/velocity \
-            --export-debug "iOS" build/velocity.zip
-          test -f build/velocity.zip
+          mkdir -p "$GITHUB_WORKSPACE/build"
+          "$GODOT" --headless --path "$GITHUB_WORKSPACE/source/velocity" \
+            --export-debug "iOS" "$GITHUB_WORKSPACE/build/velocity.zip"
+          test -f "$GITHUB_WORKSPACE/build/velocity.zip"
+
 
       - name: Build unsigned iOS app
         run: |
