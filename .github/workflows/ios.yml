@@ -1,4 +1,5 @@
-name: Godot iOS Build
+
+name: Godot iOS IPA Build
 
 on:
   workflow_dispatch:
@@ -21,10 +22,8 @@ jobs:
       - name: Extract project
         run: |
           set -e
-          mkdir -p source
           unzip -q velocity_godot_phase1_chinese_font.zip -d source
           test -f source/velocity/project.godot
-          test -f "source/velocity/assets/fonts/NotoSansSC[wght].ttf"
 
       - name: Install Godot
         run: |
@@ -40,7 +39,7 @@ jobs:
           test -x "$GODOT"
           echo "GODOT=$GODOT" >> "$GITHUB_ENV"
 
-      - name: Install Godot export templates
+      - name: Install export templates
         run: |
           set -e
           curl -L --fail \
@@ -51,22 +50,83 @@ jobs:
           cp -R templates/templates/. \
             "$HOME/Library/Application Support/Godot/export_templates/4.3.stable/"
 
-      - name: Check project
+      - name: Import project
         run: |
+          set -e
           "$GODOT" --headless --path source/velocity --editor --quit
 
-      - name: Export project resources
-        continue-on-error: true
+      - name: Create iOS export preset
         run: |
-          "$GODOT" --headless --path source/velocity \
-            --export-pack "iOS" build/velocity.pck
+          cat > source/velocity/export_presets.cfg <<'EOF'
+          [preset.0]
 
-      - name: Save build files and logs
+          name="iOS"
+          platform="iOS"
+          runnable=false
+          dedicated_server=false
+          custom_features=""
+          export_filter="all_resources"
+          include_filter=""
+          exclude_filter=""
+          export_path="build/velocity.zip"
+          encryption_include_filters=""
+          encryption_exclude_filters=""
+          encrypt_pck=false
+          encrypt_directory=false
+
+          [preset.0.options]
+
+          application/app_store_team_id="ABCDE12345"
+          application/bundle_identifier="com.example.velocity"
+          EOF
+
+      - name: Export iOS Xcode project
+        run: |
+          set -e
+          mkdir -p build
+          "$GODOT" --headless --path source/velocity \
+            --export-debug "iOS" build/velocity.zip
+          test -f build/velocity.zip
+
+      - name: Build unsigned iOS app
+        run: |
+          set -e
+          mkdir -p build/xcode
+          unzip -q build/velocity.zip -d build/xcode
+
+          PROJECT="$(find build/xcode -name '*.xcodeproj' -type d | head -n 1)"
+          test -n "$PROJECT"
+
+          xcodebuild -list -json -project "$PROJECT" > build/xcode-list.json
+
+          SCHEME="$(python3 -c \
+            'import json; d=json.load(open("build/xcode-list.json")); print(d["project"]["schemes"][0])')"
+          test -n "$SCHEME"
+
+          xcodebuild \
+            -project "$PROJECT" \
+            -scheme "$SCHEME" \
+            -configuration Debug \
+            -sdk iphoneos \
+            -derivedDataPath "$PWD/build/derived" \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+          APP="$(find build/derived/Build/Products/Debug-iphoneos -maxdepth 1 -name '*.app' -type d | head -n 1)"
+          test -n "$APP"
+
+          mkdir -p build/ipa/Payload
+          cp -R "$APP" build/ipa/Payload/
+          cd build/ipa
+          zip -qry ../velocity-unsigned.ipa Payload
+
+      - name: Upload IPA and logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: velocity-ios-build-files
+          name: velocity-ios-output
           path: |
-            source/velocity/
-            build/
+            build/velocity.zip
+            build/velocity-unsigned.ipa
+            build/xcode-list.json
           if-no-files-found: warn
