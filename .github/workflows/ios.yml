@@ -1,63 +1,185 @@
 
-name: Godot iOS IPA Build
+name: Build Velocity iOS
 
 on:
   workflow_dispatch:
   push:
-    paths:
-      - "velocity_godot_phase1_chinese_font.zip"
-      - ".github/workflows/ios.yml"
+    branches:
+      - main
+      - master
 
 permissions:
   contents: read
 
 jobs:
-  build:
+  build-ios:
     runs-on: macos-14
+    timeout-minutes: 60
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Extract project
+      - name: Prepare directories
         run: |
           set -e
-          unzip -q velocity_godot_phase1_chinese_font.zip -d source
-          test -f source/velocity/project.godot
+          mkdir -p "$GITHUB_WORKSPACE/source"
+          mkdir -p "$GITHUB_WORKSPACE/build"
 
-      - name: Install Godot
+      - name: Extract Godot project
         run: |
           set -e
-          curl -L --fail \
-            https://github.com/godotengine/godot/releases/download/4.3-stable/Godot_v4.3-stable_macos.universal.zip \
-            -o godot.zip
-          unzip -q godot.zip -d godot
-          GODOT="$(find godot -type f -path '*/Contents/MacOS/Godot' | head -n 1)"
-          if [ -z "$GODOT" ]; then
-            GODOT="$(find godot -type f -name Godot | head -n 1)"
+          ZIP_FILE="$GITHUB_WORKSPACE/velocity_godot_phase1_chinese_font.zip"
+
+          if [ ! -f "$ZIP_FILE" ]; then
+            echo "ERROR: 找不到 velocity_godot_phase1_chinese_font.zip"
+            echo "请确认这个 ZIP 已上传到 GitHub 仓库根目录。"
+            ls -la "$GITHUB_WORKSPACE"
+            exit 1
           fi
-          test -x "$GODOT"
-          echo "GODOT=$GODOT" >> "$GITHUB_ENV"
 
-      - name: Install export templates
+          unzip -o "$ZIP_FILE" -d "$GITHUB_WORKSPACE/source"
+
+          PROJECT_FILE="$(find "$GITHUB_WORKSPACE/source" -name project.godot -print -quit)"
+
+          if [ -z "$PROJECT_FILE" ]; then
+            echo "ERROR: ZIP 中找不到 project.godot"
+            find "$GITHUB_WORKSPACE/source" -maxdepth 4 -type f | head -100
+            exit 1
+          fi
+
+          PROJECT_DIR="$(dirname "$PROJECT_FILE")"
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+          echo "找到 Godot 项目：$PROJECT_DIR"
+
+      - name: Download Godot 4.3
         run: |
           set -e
-          curl -L --fail \
-            https://github.com/godotengine/godot/releases/download/4.3-stable/Godot_v4.3-stable_export_templates.tpz \
-            -o templates.tpz
+          cd "$GITHUB_WORKSPACE"
+
+          curl -fL \
+            "https://github.com/godotengine/godot/releases/download/4.3-stable/Godot_v4.3-stable_macos.universal.zip" \
+            -o godot.zip
+
+          unzip -o godot.zip -d godot-bin
+
+          GODOT_BIN="$(find "$GITHUB_WORKSPACE/godot-bin" -type f -name 'Godot*' -perm -111 -print -quit)"
+
+          if [ -z "$GODOT_BIN" ]; then
+            GODOT_BIN="$(find "$GITHUB_WORKSPACE/godot-bin" -type f -name 'Godot*' -print -quit)"
+          fi
+
+          if [ -z "$GODOT_BIN" ]; then
+            echo "ERROR: 找不到 Godot 可执行文件"
+            find "$GITHUB_WORKSPACE/godot-bin" -maxdepth 4 -print
+            exit 1
+          fi
+
+          chmod +x "$GODOT_BIN"
+          echo "GODOT=$GODOT_BIN" >> "$GITHUB_ENV"
+          "$GODOT_BIN" --version
+
+      - name: Download Godot export templates
+        run: |
+          set -e
+          mkdir -p "$HOME/Library/Application Support/Godot"
+
+          curl -fL \
+            "https://github.com/godotengine/godot/releases/download/4.3-stable/Godot_v4.3-stable_export_templates.tpz" \
+            -o "$GITHUB_WORKSPACE/templates.tpz"
+
+          mkdir -p "$GITHUB_WORKSPACE/template-extract"
+          unzip -o "$GITHUB_WORKSPACE/templates.tpz" \
+            -d "$GITHUB_WORKSPACE/template-extract"
+
           mkdir -p "$HOME/Library/Application Support/Godot/export_templates/4.3.stable"
-          unzip -oq templates.tpz -d templates
-          cp -R templates/templates/. \
+
+          TEMPLATE_DIR="$(find "$GITHUB_WORKSPACE/template-extract" -type d -name 'templates' -print -quit)"
+
+          if [ -z "$TEMPLATE_DIR" ]; then
+            TEMPLATE_DIR="$GITHUB_WORKSPACE/template-extract"
+          fi
+
+          cp -R "$TEMPLATE_DIR"/. \
             "$HOME/Library/Application Support/Godot/export_templates/4.3.stable/"
 
-      - name: Import project
+          ls -la "$HOME/Library/Application Support/Godot/export_templates/4.3.stable"
+
+      - name: Generate iOS icons
         run: |
           set -e
-          "$GODOT" --headless --path source/velocity --editor --quit
+          python3 -m pip install --user Pillow
+
+          ICON_DIR="$PROJECT_DIR/assets/icons"
+          mkdir -p "$ICON_DIR"
+
+          python3 - "$ICON_DIR" <<'PY'
+          from PIL import Image, ImageDraw
+          import os
+          import sys
+
+          out = sys.argv[1]
+          os.makedirs(out, exist_ok=True)
+
+          img = Image.new("RGB", (1024, 1024), (18, 28, 48))
+          d = ImageDraw.Draw(img)
+
+          d.rounded_rectangle(
+              (112, 112, 912, 912),
+              radius=180,
+              fill=(30, 100, 160)
+          )
+          d.ellipse(
+              (272, 272, 752, 752),
+              outline=(255, 255, 255),
+              width=32
+          )
+          d.ellipse(
+              (382, 382, 642, 642),
+              outline=(255, 210, 70),
+              width=32
+          )
+          d.line(
+              (512, 220, 512, 804),
+              fill=(255, 255, 255),
+              width=18
+          )
+          d.line(
+              (220, 512, 804, 512),
+              fill=(255, 255, 255),
+              width=18
+          )
+
+          sizes = {
+              "iphone_120.png": 120,
+              "iphone_180.png": 180,
+              "ipad_76.png": 76,
+              "ipad_152.png": 152,
+              "ipad_167.png": 167,
+              "app_store_1024.png": 1024,
+          }
+
+          for name, size in sizes.items():
+              img.resize(
+                  (size, size),
+                  Image.Resampling.LANCZOS
+              ).save(os.path.join(out, name))
+
+          print("iOS 图标已生成：", out)
+          PY
+
+      - name: Import Godot project
+        run: |
+          set -e
+          "$GODOT" --headless --editor \
+            --path "$PROJECT_DIR" \
+            --quit
 
       - name: Create iOS export preset
         run: |
-          cat > source/velocity/export_presets.cfg <<'EOF'
+          set -e
+
+          cat > "$PROJECT_DIR/export_presets.cfg" <<'PRESET'
           [preset.0]
 
           name="iOS"
@@ -76,53 +198,116 @@ jobs:
 
           [preset.0.options]
 
-          application/app_store_team_id="ABCDE12345"
+          application/app_store_team_id=""
           application/bundle_identifier="com.example.velocity"
-          EOF
+          icons/iphone_120x120="res://assets/icons/iphone_120.png"
+          icons/iphone_180x180="res://assets/icons/iphone_180.png"
+          icons/ipad_76x76="res://assets/icons/ipad_76.png"
+          icons/ipad_152x152="res://assets/icons/ipad_152.png"
+          icons/ipad_167x167="res://assets/icons/ipad_167.png"
+          icons/app_store_1024x1024="res://assets/icons/app_store_1024.png"
+          PRESET
 
-      
+          echo "已创建 iOS 导出预设"
+          cat "$PROJECT_DIR/export_presets.cfg"
+
       - name: Export iOS Xcode project
         run: |
           set -e
           mkdir -p "$GITHUB_WORKSPACE/build"
-          "$GODOT" --headless --path "$GITHUB_WORKSPACE/source/velocity" \
-            --export-debug "iOS" "$GITHUB_WORKSPACE/build/velocity.zip"
-          test -f "$GITHUB_WORKSPACE/build/velocity.zip"
 
+          "$GODOT" --headless \
+            --path "$PROJECT_DIR" \
+            --export-debug "iOS" \
+            "$GITHUB_WORKSPACE/build/velocity.zip"
+
+          if [ ! -f "$GITHUB_WORKSPACE/build/velocity.zip" ]; then
+            echo "ERROR: Godot 没有生成导出 ZIP"
+            exit 1
+          fi
+
+          echo "Godot iOS 导出成功"
+          ls -lh "$GITHUB_WORKSPACE/build/velocity.zip"
+
+      - name: Extract Xcode project
+        run: |
+          set -e
+          mkdir -p "$GITHUB_WORKSPACE/build/xcode"
+
+          unzip -o "$GITHUB_WORKSPACE/build/velocity.zip" \
+            -d "$GITHUB_WORKSPACE/build/xcode"
+
+          find "$GITHUB_WORKSPACE/build/xcode" \
+            -name '*.xcodeproj' -print
+
+          find "$GITHUB_WORKSPACE/build/xcode" \
+            -name '*.xcworkspace' -print
 
       - name: Build unsigned iOS app
         run: |
           set -e
-          mkdir -p build/xcode
-          unzip -q build/velocity.zip -d build/xcode
 
-          PROJECT="$(find build/xcode -name '*.xcodeproj' -type d | head -n 1)"
-          test -n "$PROJECT"
+          XCODEPROJ="$(find "$GITHUB_WORKSPACE/build/xcode" \
+            -name '*.xcodeproj' -print -quit)"
 
-          xcodebuild -list -json -project "$PROJECT" > build/xcode-list.json
+          if [ -z "$XCODEPROJ" ]; then
+            echo "ERROR: 导出内容中找不到 Xcode 项目"
+            find "$GITHUB_WORKSPACE/build/xcode" -maxdepth 5 -print
+            exit 1
+          fi
 
-          SCHEME="$(python3 -c \
-            'import json; d=json.load(open("build/xcode-list.json")); print(d["project"]["schemes"][0])')"
-          test -n "$SCHEME"
+          PROJECT_NAME="$(basename "$XCODEPROJ" .xcodeproj)"
+          SCHEME="$PROJECT_NAME"
 
           xcodebuild \
-            -project "$PROJECT" \
+            -list \
+            -project "$XCODEPROJ" \
+            > "$GITHUB_WORKSPACE/build/xcode-list.txt" 2>&1 || true
+
+          cat "$GITHUB_WORKSPACE/build/xcode-list.txt"
+
+          xcodebuild \
+            -project "$XCODEPROJ" \
             -scheme "$SCHEME" \
             -configuration Debug \
             -sdk iphoneos \
-            -derivedDataPath "$PWD/build/derived" \
+            -derivedDataPath "$GITHUB_WORKSPACE/build/DerivedData" \
             CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
             build
 
-          APP="$(find build/derived/Build/Products/Debug-iphoneos -maxdepth 1 -name '*.app' -type d | head -n 1)"
-          test -n "$APP"
+          APP_PATH="$GITHUB_WORKSPACE/build/DerivedData/Build/Products/Debug-iphoneos/$PROJECT_NAME.app"
 
-          mkdir -p build/ipa/Payload
-          cp -R "$APP" build/ipa/Payload/
-          cd build/ipa
-          zip -qry ../velocity-unsigned.ipa Payload
+          if [ ! -d "$APP_PATH" ]; then
+            APP_PATH="$(find "$GITHUB_WORKSPACE/build/DerivedData/Build/Products" \
+              -maxdepth 3 -type d -name '*.app' -print -quit)"
+          fi
 
-      - name: Upload IPA and logs
+          if [ -z "$APP_PATH" ] || [ ! -d "$APP_PATH" ]; then
+            echo "ERROR: Xcode 没有生成 .app"
+            find "$GITHUB_WORKSPACE/build/DerivedData/Build/Products" \
+              -maxdepth 5 -print
+            exit 1
+          fi
+
+          echo "APP_PATH=$APP_PATH" >> "$GITHUB_ENV"
+          echo "找到 App：$APP_PATH"
+
+      - name: Package unsigned IPA
+        run: |
+          set -e
+
+          mkdir -p "$GITHUB_WORKSPACE/build/ipa/Payload"
+          cp -R "$APP_PATH" "$GITHUB_WORKSPACE/build/ipa/Payload/"
+
+          cd "$GITHUB_WORKSPACE/build/ipa"
+          zip -r "$GITHUB_WORKSPACE/build/velocity-unsigned.ipa" Payload
+
+          test -f "$GITHUB_WORKSPACE/build/velocity-unsigned.ipa"
+          ls -lh "$GITHUB_WORKSPACE/build/velocity-unsigned.ipa"
+
+      - name: Upload build artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -130,5 +315,6 @@ jobs:
           path: |
             build/velocity.zip
             build/velocity-unsigned.ipa
-            build/xcode-list.json
+            build/xcode-list.txt
           if-no-files-found: warn
+          retention-days: 7
