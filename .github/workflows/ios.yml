@@ -1,0 +1,53 @@
+
+name: Godot iOS Build
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "velocity_godot_phase1_chinese_font.zip"
+      - ".github/workflows/ios.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Check uploaded project
+        run: |
+          set -e
+          test -f velocity_godot_phase1_chinese_font.zip
+          mkdir -p source
+          unzip -q velocity_godot_phase1_chinese_font.zip -d source
+          test -f source/velocity/project.godot
+          test -f "source/velocity/assets/fonts/NotoSansSC[wght].ttf"
+
+      - name: Install Godot
+        run: |
+          set -e
+          curl -L --fail \
+            https://github.com/godotengine/godot/releases/download/4.3-stable/Godot_v4.3-stable_macos.universal.zip \
+            -o godot.zip
+          unzip -q godot.zip -d godot
+          GODOT="$(find godot -type f -name 'Godot' | head -n 1)"
+          if [ -z "$GODOT" ]; then
+            GODOT="$(find godot -type f -name 'Godot.app' | head -n 1)/Contents/MacOS/Godot"
+          fi
+          test -x "$GODOT"
+          echo "GODOT=$GODOT" >> "$GITHUB_ENV"
+
+      - name: Check Godot project
+        run: |
+          "$GODOT" --headless --path source/velocity --editor --quit
+
+      - name: Save project artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: velocity-godot-source
+          path: source/velocity/
+          if-no-files-found: error
