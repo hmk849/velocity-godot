@@ -33,7 +33,7 @@ jobs:
 
           if [ ! -f "$ZIP_FILE" ]; then
             echo "ERROR: 找不到 velocity_godot_phase1_chinese_font.zip"
-            echo "请确认这个 ZIP 已上传到 GitHub 仓库根目录。"
+            echo "请确认 ZIP 已上传到 GitHub 仓库根目录。"
             ls -la "$GITHUB_WORKSPACE"
             exit 1
           fi
@@ -89,12 +89,13 @@ jobs:
             -o "$GITHUB_WORKSPACE/templates.tpz"
 
           mkdir -p "$GITHUB_WORKSPACE/template-extract"
+
           unzip -o "$GITHUB_WORKSPACE/templates.tpz" \
             -d "$GITHUB_WORKSPACE/template-extract"
 
           mkdir -p "$HOME/Library/Application Support/Godot/export_templates/4.3.stable"
 
-          TEMPLATE_DIR="$(find "$GITHUB_WORKSPACE/template-extract" -type d -name 'templates' -print -quit)"
+          TEMPLATE_DIR="$(find "$GITHUB_WORKSPACE/template-extract" -type d -name templates -print -quit)"
 
           if [ -z "$TEMPLATE_DIR" ]; then
             TEMPLATE_DIR="$GITHUB_WORKSPACE/template-extract"
@@ -108,12 +109,15 @@ jobs:
       - name: Generate iOS icons
         run: |
           set -e
-          python3 -m pip install --user Pillow
+
+          python3 -m venv "$RUNNER_TEMP/ios-venv"
+          "$RUNNER_TEMP/ios-venv/bin/python" -m pip install --upgrade pip
+          "$RUNNER_TEMP/ios-venv/bin/python" -m pip install Pillow
 
           ICON_DIR="$PROJECT_DIR/assets/icons"
           mkdir -p "$ICON_DIR"
 
-          python3 - "$ICON_DIR" <<'PY'
+          "$RUNNER_TEMP/ios-venv/bin/python" - "$ICON_DIR" <<'PY'
           from PIL import Image, ImageDraw
           import os
           import sys
@@ -129,21 +133,25 @@ jobs:
               radius=180,
               fill=(30, 100, 160)
           )
+
           d.ellipse(
               (272, 272, 752, 752),
               outline=(255, 255, 255),
               width=32
           )
+
           d.ellipse(
               (382, 382, 642, 642),
               outline=(255, 210, 70),
               width=32
           )
+
           d.line(
               (512, 220, 512, 804),
               fill=(255, 255, 255),
               width=18
           )
+
           d.line(
               (220, 512, 804, 512),
               fill=(255, 255, 255),
@@ -160,13 +168,16 @@ jobs:
           }
 
           for name, size in sizes.items():
-              img.resize(
+              image = img.resize(
                   (size, size),
                   Image.Resampling.LANCZOS
-              ).save(os.path.join(out, name))
+              )
+              image.save(os.path.join(out, name))
 
-          print("iOS 图标已生成：", out)
+          print("iOS 图标生成完成：", out)
           PY
+
+          ls -lh "$ICON_DIR"
 
       - name: Import Godot project
         run: |
@@ -208,12 +219,13 @@ jobs:
           icons/app_store_1024x1024="res://assets/icons/app_store_1024.png"
           PRESET
 
-          echo "已创建 iOS 导出预设"
+          echo "iOS 导出预设已创建"
           cat "$PROJECT_DIR/export_presets.cfg"
 
       - name: Export iOS Xcode project
         run: |
           set -e
+
           mkdir -p "$GITHUB_WORKSPACE/build"
 
           "$GODOT" --headless \
@@ -232,16 +244,15 @@ jobs:
       - name: Extract Xcode project
         run: |
           set -e
+
           mkdir -p "$GITHUB_WORKSPACE/build/xcode"
 
           unzip -o "$GITHUB_WORKSPACE/build/velocity.zip" \
             -d "$GITHUB_WORKSPACE/build/xcode"
 
           find "$GITHUB_WORKSPACE/build/xcode" \
-            -name '*.xcodeproj' -print
-
-          find "$GITHUB_WORKSPACE/build/xcode" \
-            -name '*.xcworkspace' -print
+            \( -name '*.xcodeproj' -o -name '*.xcworkspace' \) \
+            -print
 
       - name: Build unsigned iOS app
         run: |
@@ -251,13 +262,12 @@ jobs:
             -name '*.xcodeproj' -print -quit)"
 
           if [ -z "$XCODEPROJ" ]; then
-            echo "ERROR: 导出内容中找不到 Xcode 项目"
+            echo "ERROR: 找不到 Xcode 项目"
             find "$GITHUB_WORKSPACE/build/xcode" -maxdepth 5 -print
             exit 1
           fi
 
           PROJECT_NAME="$(basename "$XCODEPROJ" .xcodeproj)"
-          SCHEME="$PROJECT_NAME"
 
           xcodebuild \
             -list \
@@ -268,7 +278,7 @@ jobs:
 
           xcodebuild \
             -project "$XCODEPROJ" \
-            -scheme "$SCHEME" \
+            -scheme "$PROJECT_NAME" \
             -configuration Debug \
             -sdk iphoneos \
             -derivedDataPath "$GITHUB_WORKSPACE/build/DerivedData" \
@@ -281,7 +291,7 @@ jobs:
 
           if [ ! -d "$APP_PATH" ]; then
             APP_PATH="$(find "$GITHUB_WORKSPACE/build/DerivedData/Build/Products" \
-              -maxdepth 3 -type d -name '*.app' -print -quit)"
+              -maxdepth 4 -type d -name '*.app' -print -quit)"
           fi
 
           if [ -z "$APP_PATH" ] || [ ! -d "$APP_PATH" ]; then
